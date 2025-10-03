@@ -353,7 +353,7 @@ const EQUIPMENT_STATUS = [
 const ZONES = ["G1", "G2", "G3","Laboratoire", "G4", "Urgences", "Direction", "1er étage", "2e étage", "Rez-de-chaussée"];
 
 // ========================================
-// FONCTIONS UTILITAIRES POUR LES MÉTRIQUES TEMPORELLES
+// FONCTIONS UTILITAIRES POUR LES MÉTRIQUES TEMPORELLES (EN MINUTES)
 // ========================================
 
 const calculateTimeMetrics = (requests) => {
@@ -372,11 +372,11 @@ const calculateTimeMetrics = (requests) => {
   const processingTimes = completedRequests.map(req => {
     const created = new Date(req.created_at);
     const completed = new Date(req.completed_at);
-    return Math.round((completed - created) / (1000 * 60 * 60)); // en heures
+    return Math.round((completed - created) / (1000 * 60)); // en MINUTES
   });
 
   const totalProcessingTime = processingTimes.reduce((sum, time) => sum + time, 0);
-  const averageProcessingTime = Math.round(totalProcessingTime / processingTimes.length * 10) / 10;
+  const averageProcessingTime = Math.round(totalProcessingTime / processingTimes.length);
   const fastestResolution = Math.min(...processingTimes);
   const slowestResolution = Math.max(...processingTimes);
 
@@ -390,14 +390,88 @@ const calculateTimeMetrics = (requests) => {
   };
 };
 
-const formatDuration = (hours) => {
-  if (hours < 24) {
-    return `${hours}h`;
+const formatDuration = (minutes) => {
+  if (minutes < 60) {
+    return `${minutes} min`;
+  } else if (minutes < 1440) { // moins de 24h
+    const hours = Math.floor(minutes / 60);
+    const remainingMinutes = minutes % 60;
+    return remainingMinutes > 0 ? `${hours}h ${remainingMinutes}min` : `${hours}h`;
   } else {
-    const days = Math.floor(hours / 24);
-    const remainingHours = hours % 24;
-    return remainingHours > 0 ? `${days}j ${remainingHours}h` : `${days}j`;
+    const days = Math.floor(minutes / 1440);
+    const remainingHours = Math.floor((minutes % 1440) / 60);
+    const remainingMinutes = minutes % 60;
+    let result = `${days}j`;
+    if (remainingHours > 0) result += ` ${remainingHours}h`;
+    if (remainingMinutes > 0) result += ` ${remainingMinutes}min`;
+    return result;
   }
+};
+
+// Fonction pour extraire la quantité de la description
+const extractQuantityFromDescription = (description) => {
+  if (!description) return 1;
+  
+  // Patterns pour détecter les quantités
+  const patterns = [
+    /(\d+)\s*(souris|clavier|écran|moniteur|ordinateur|pc|cartouche|câble|chargeur|téléphone|portable|imprimante|multiprise|projecteur|tapis|sac|disque|usb|hdmi|vga|sim)/i,
+    /commander\s+(\d+)\s*/i,
+    /quantité\s*[:=]\s*(\d+)/i,
+    /qty\s*[:=]\s*(\d+)/i,
+    /besoin\s+de\s+(\d+)/i,
+    /(\d+)\s+unités?/i,
+    /(\d+)\s+pièces?/i,
+    /(\d+)\s+exemplaires?/i
+  ];
+  
+  // Mots nombres en français
+  const wordNumbers = {
+    'un': 1, 'une': 1,
+    'deux': 2,
+    'trois': 3,
+    'quatre': 4,
+    'cinq': 5,
+    'six': 6,
+    'sept': 7,
+    'huit': 8,
+    'neuf': 9,
+    'dix': 10,
+    'onze': 11,
+    'douze': 12,
+    'quinze': 15,
+    'vingt': 20,
+    'trente': 30,
+    'quarante': 40,
+    'cinquante': 50
+  };
+  
+  // Chercher un nombre écrit en lettres
+  const lowerDesc = description.toLowerCase();
+  for (const [word, value] of Object.entries(wordNumbers)) {
+    const wordPattern = new RegExp(`\\b${word}\\s+(souris|clavier|écran|moniteur|ordinateur|pc|cartouche|câble|chargeur|téléphone|portable|imprimante|multiprise|projecteur|tapis|sac|disque|usb|hdmi|vga|sim)`, 'i');
+    if (wordPattern.test(lowerDesc)) {
+      return value;
+    }
+  }
+  
+  // Chercher un nombre en chiffres
+  for (const pattern of patterns) {
+    const match = description.match(pattern);
+    if (match && match[1]) {
+      const qty = parseInt(match[1], 10);
+      if (!isNaN(qty) && qty > 0 && qty < 1000) {
+        return qty;
+      }
+    }
+  }
+  
+  // Par défaut, si on détecte "une" ou "un", retourner 1
+  if (/\b(une?|la?|le)\s+(souris|clavier|écran|moniteur|ordinateur|pc|cartouche|câble|chargeur|téléphone|portable|imprimante|multiprise|projecteur|tapis|sac|disque|usb|hdmi|vga|sim)/i.test(lowerDesc)) {
+    return 1;
+  }
+  
+  // Défaut : 1
+  return 1;
 };
 
 // Fonction pour obtenir l'icône selon le type d'équipement
@@ -656,7 +730,7 @@ const InventoryManagementTab = React.memo(({
       setTotal(count ?? 0);
     } catch (err) {
       console.error('Erreur inventaire:', err);
-      showSnackbar('Erreur lors de la récupération de l’inventaire', 'error');
+      showSnackbar('Erreur lors de la récupération de l\'inventaire', 'error');
     } finally {
       setLoading(false);
     }
@@ -752,7 +826,7 @@ const InventoryManagementTab = React.memo(({
       fetchInventory();
     } catch (error) {
       console.error('Erreur sauvegarde:', error);
-      showSnackbar('Erreur lors de la sauvegarde de l’équipement', 'error');
+      showSnackbar('Erreur lors de la sauvegarde de l\'équipement', 'error');
     } finally {
       setLoading(false);
     }
@@ -2404,7 +2478,7 @@ const ReportingTab = React.memo(({
     setTimeMetrics(calculatedTimeMetrics);
   }, [dateFilter, requests, profile, user]);
 
-  // Fonction pour générer le PDF avec les métriques temporelles
+  // Fonction pour générer le PDF avec les métriques temporelles EN MINUTES
   const generatePDF = async () => {
     setIsGeneratingPDF(true);
     try {
@@ -2531,7 +2605,7 @@ const ReportingTab = React.memo(({
                 ${Object.entries(filteredData.byPriority).map(([priority, count]) => {
                   const priorityRequests = requests.filter(req => req.priority === priority && req.status === 'termine' && req.completed_at);
                   const avgTime = priorityRequests.length > 0 ? 
-                    priorityRequests.reduce((sum, req) => sum + Math.round((new Date(req.completed_at) - new Date(req.created_at)) / (1000 * 60 * 60)), 0) / priorityRequests.length : 0;
+                    priorityRequests.reduce((sum, req) => sum + Math.round((new Date(req.completed_at) - new Date(req.created_at)) / (1000 * 60)), 0) / priorityRequests.length : 0;
                   
                   return `
                     <tr>
@@ -2881,6 +2955,193 @@ const ReportingTab = React.memo(({
 });
 
 // ========================================
+// FONCTION DE GÉNÉRATION DE BON DE COMMANDE PDF
+// ========================================
+
+const generateOrderPDF = async (request, showSnackbar) => {
+  try {
+    // Vérifier si html2pdf est chargé
+    if (!window.html2pdf) {
+      const script = document.createElement('script');
+      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
+      document.head.appendChild(script);
+      
+      await new Promise((resolve) => {
+        script.onload = resolve;
+      });
+    }
+
+    // Extraire la quantité depuis la description
+    const quantity = extractQuantityFromDescription(request.description);
+    const orderDate = new Date().toLocaleDateString('fr-FR');
+    
+    // Créer le contenu HTML du bon de commande
+    const pdfContent = document.createElement('div');
+    pdfContent.innerHTML = `
+      <div style="font-family: 'Arial', sans-serif; padding: 40px; max-width: 800px; margin: 0 auto;">
+        <!-- En-tête -->
+        <div style="border-bottom: 3px solid #1976d2; padding-bottom: 20px; margin-bottom: 30px;">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <div>
+              <img src="/logo-centre-diagnostic.png" alt="Centre Diagnostic" style="height: 80px; margin-bottom: 10px;">
+              <h1 style="color: #1976d2; margin: 0; font-size: 32px;">BON DE COMMANDE</h1>
+            </div>
+            <div style="text-align: right;">
+              <div style="background-color: #1976d2; color: white; padding: 10px 20px; border-radius: 5px; font-weight: bold;">
+                N° ${request.ticket_number}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Informations générales -->
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px; margin-bottom: 30px;">
+          <div style="background-color: #f5f5f5; padding: 20px; border-radius: 8px;">
+            <h3 style="color: #333; margin-top: 0; border-bottom: 2px solid #1976d2; padding-bottom: 10px;">
+              Informations du Demandeur
+            </h3>
+            <table style="width: 100%;">
+              <tr>
+                <td style="padding: 8px 0; font-weight: bold; color: #666;">Service:</td>
+                <td style="padding: 8px 0;">${request.service_demandeur}</td>
+              </tr>
+              <tr>
+                <td style="padding: 8px 0; font-weight: bold; color: #666;">Email:</td>
+                <td style="padding: 8px 0;">${request.user_profile?.email || 'N/A'}</td>
+              </tr>
+              <tr>
+                <td style="padding: 8px 0; font-weight: bold; color: #666;">Localisation:</td>
+                <td style="padding: 8px 0;">${request.location}</td>
+              </tr>
+            </table>
+          </div>
+
+          <div style="background-color: #f5f5f5; padding: 20px; border-radius: 8px;">
+            <h3 style="color: #333; margin-top: 0; border-bottom: 2px solid #1976d2; padding-bottom: 10px;">
+              Détails de la Commande
+            </h3>
+            <table style="width: 100%;">
+              <tr>
+                <td style="padding: 8px 0; font-weight: bold; color: #666;">Date:</td>
+                <td style="padding: 8px 0;">${orderDate}</td>
+              </tr>
+              <tr>
+                <td style="padding: 8px 0; font-weight: bold; color: #666;">Priorité:</td>
+                <td style="padding: 8px 0;">
+                  <span style="background-color: ${
+                    request.priority === 'urgente' ? '#ff5252' : 
+                    request.priority === 'moyenne' ? '#ff9800' : 
+                    '#4caf50'
+                  }; color: white; padding: 4px 12px; border-radius: 4px; font-weight: bold;">
+                    ${request.priority.toUpperCase()}
+                  </span>
+                </td>
+              </tr>
+              <tr>
+                <td style="padding: 8px 0; font-weight: bold; color: #666;">Statut:</td>
+                <td style="padding: 8px 0;">
+                  <span style="background-color: ${
+                    request.status === 'termine' ? '#4caf50' : 
+                    request.status === 'en_cours' ? '#ff9800' : 
+                    '#9e9e9e'
+                  }; color: white; padding: 4px 12px; border-radius: 4px;">
+                    ${request.status.replace('_', ' ').toUpperCase()}
+                  </span>
+                </td>
+              </tr>
+            </table>
+          </div>
+        </div>
+
+        <!-- Tableau des articles -->
+        <div style="margin-bottom: 30px;">
+          <h3 style="color: #333; border-bottom: 2px solid #1976d2; padding-bottom: 10px;">
+            Articles Commandés
+          </h3>
+          <table style="width: 100%; border-collapse: collapse;">
+            <thead>
+              <tr style="background-color: #1976d2; color: white;">
+                <th style="padding: 12px; text-align: left; border: 1px solid #1976d2;">Référence</th>
+                <th style="padding: 12px; text-align: left; border: 1px solid #1976d2;">Désignation</th>
+                <th style="padding: 12px; text-align: center; border: 1px solid #1976d2;">Quantité</th>
+                <th style="padding: 12px; text-align: center; border: 1px solid #1976d2;">Prix Unitaire</th>
+                <th style="padding: 12px; text-align: center; border: 1px solid #1976d2;">Prix Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td style="padding: 12px; border: 1px solid #ddd;">001</td>
+                <td style="padding: 12px; border: 1px solid #ddd;">
+                  <strong>${request.category}</strong>
+                </td>
+                <td style="padding: 12px; text-align: center; border: 1px solid #ddd; font-weight: bold; font-size: 18px;">
+                  ${quantity}
+                </td>
+                <td style="padding: 12px; text-align: center; border: 1px solid #ddd; color: #666;">
+                  À définir
+                </td>
+                <td style="padding: 12px; text-align: center; border: 1px solid #ddd; color: #666;">
+                  À définir
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Description détaillée -->
+        <div style="margin-bottom: 30px; background-color: #fff3e0; padding: 20px; border-radius: 8px; border-left: 4px solid #ff9800;">
+          <h3 style="color: #333; margin-top: 0;">Description Détaillée</h3>
+          <p style="line-height: 1.6; color: #555;">
+            ${request.description}
+          </p>
+        </div>
+
+        <!-- Signatures -->
+        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 30px; margin-top: 50px;">
+          <div style="text-align: center;">
+            <div style="border-bottom: 2px solid #333; margin-bottom: 10px; height: 60px;"></div>
+            <p style="margin: 0; font-weight: bold;">Demandeur</p>
+            <p style="margin: 0; color: #666; font-size: 12px;">Date et Signature</p>
+          </div>
+          <div style="text-align: center;">
+            <div style="border-bottom: 2px solid #333; margin-bottom: 10px; height: 60px;"></div>
+            <p style="margin: 0; font-weight: bold;">Responsable Service</p>
+            <p style="margin: 0; color: #666; font-size: 12px;">Date et Signature</p>
+          </div>
+          <div style="text-align: center;">
+            <div style="border-bottom: 2px solid #333; margin-bottom: 10px; height: 60px;"></div>
+            <p style="margin: 0; font-weight: bold;">Direction</p>
+            <p style="margin: 0; color: #666; font-size: 12px;">Date et Signature</p>
+          </div>
+        </div>
+
+        <!-- Pied de page -->
+        <div style="margin-top: 40px; padding-top: 20px; border-top: 2px solid #e0e0e0; text-align: center; color: #666; font-size: 12px;">
+          <p>Centre Diagnostic - Gestion des Commandes IT</p>
+          <p>Ce document est généré automatiquement le ${new Date().toLocaleString('fr-FR')}</p>
+        </div>
+      </div>
+    `;
+
+    // Options pour la génération PDF
+    const options = {
+      margin: 10,
+      filename: `bon_commande_${request.ticket_number}_${new Date().toISOString().split('T')[0]}.pdf`,
+      image: { type: 'jpeg', quality: 0.98 },
+      html2canvas: { scale: 2, useCORS: true },
+      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+    };
+
+    // Générer et télécharger le PDF
+    await window.html2pdf().from(pdfContent).set(options).save();
+    showSnackbar('Bon de commande généré avec succès !', 'success');
+  } catch (error) {
+    console.error('Erreur lors de la génération du bon de commande:', error);
+    showSnackbar('Erreur lors de la génération du bon de commande', 'error');
+  }
+};
+
+// ========================================
 // COMPOSANT PRINCIPAL APP
 // ========================================
 
@@ -2930,6 +3191,10 @@ function App() {
     myStats: {}
   });
 
+  // NOUVEAUX ÉTATS POUR LES NOTIFICATIONS
+  const [notifications, setNotifications] = useState([]);
+  const [lastRequestStatus, setLastRequestStatus] = useState({});
+
   const debugSupabaseError = (error, operation) => {
     console.error(`Erreur Supabase - ${operation}:`, {
       message: error.message,
@@ -2954,6 +3219,45 @@ function App() {
   const showSnackbar = (message, severity = 'info') => {
     setSnackbar({ open: true, message, severity });
   };
+
+  // NOUVELLE FONCTION POUR LES NOTIFICATIONS
+  const showNotification = (message, severity = 'info') => {
+    const id = Date.now();
+    setNotifications(prev => [...prev, { id, message, severity, open: true }]);
+    setTimeout(() => {
+      setNotifications(prev => prev.filter(n => n.id !== id));
+    }, 6000);
+  };
+
+  // NOUVELLE FONCTION POUR VÉRIFIER LES CHANGEMENTS DE STATUT
+  const checkStatusChanges = useCallback((newRequests) => {
+    newRequests.forEach(request => {
+      const oldStatus = lastRequestStatus[request.id];
+      const newStatus = request.status;
+      
+      // Si c'est une demande créée par l'utilisateur actuel
+      if (request.user_id === user?.id && oldStatus !== newStatus && oldStatus) {
+        if (newStatus === 'en_cours') {
+          showNotification(
+            `Votre demande ${request.ticket_number} a été prise en charge !`,
+            'info'
+          );
+        } else if (newStatus === 'termine') {
+          showNotification(
+            `Votre demande ${request.ticket_number} a été terminée !`,
+            'success'
+          );
+        }
+      }
+    });
+    
+    // Mettre à jour le statut mémorisé
+    const statusMap = {};
+    newRequests.forEach(req => {
+      statusMap[req.id] = req.status;
+    });
+    setLastRequestStatus(statusMap);
+  }, [user]);
 
   const calculateReportData = useCallback((data) => {
     const total = data.length;
@@ -3098,11 +3402,13 @@ function App() {
       console.log('Demandes récupérées:', data?.length || 0);
       setRequests(data || []);
       calculateReportData(data || []);
+      // AJOUT: Vérifier les changements de statut
+      checkStatusChanges(data || []);
     } catch (error) {
       console.error('Erreur lors de la récupération des demandes:', error);
       showSnackbar('Erreur lors de la récupération des demandes', 'error');
     }
-  }, [profile, user, calculateReportData]);
+  }, [profile, user, calculateReportData, checkStatusChanges]);
 
   const fetchProfiles = useCallback(async () => {
     try {
@@ -3169,6 +3475,13 @@ function App() {
       }));
     }
   }, [profile]);
+
+  // AJOUT: Surveiller les changements de statut
+  useEffect(() => {
+    if (requests && requests.length > 0) {
+      checkStatusChanges(requests);
+    }
+  }, [requests, checkStatusChanges]);
 
   const handleAuth = async (e) => {
     e.preventDefault();
@@ -3356,7 +3669,7 @@ function App() {
 
   const handleAssignRequest = async (requestId, assignedTo) => {
     try {
-      console.log('Assignation de la demande:', requestId, 'à ', assignedTo);
+      console.log('Assignation de la demande:', requestId, 'à', assignedTo);
       const { error } = await supabase
         .from('requests')
         .update({
@@ -4496,7 +4809,7 @@ function App() {
                     </Grid>
                   )}
 
-                  {/* Affichage du temps de traitement si la demande est terminée */}
+                  {/* MODIFICATION: Affichage du temps de traitement EN MINUTES */}
                   {selectedRequest.status === 'termine' && selectedRequest.completed_at && (
                     <Grid item xs={12} md={6}>
                       <Typography variant="subtitle2" color="text.secondary" gutterBottom sx={{ fontWeight: 600 }}>
@@ -4514,12 +4827,64 @@ function App() {
                           fontSize: '1rem'
                         }}
                       >
-                        {formatDuration(Math.round((new Date(selectedRequest.completed_at) - new Date(selectedRequest.created_at)) / (1000 * 60 * 60)))}
+                        {formatDuration(Math.round((new Date(selectedRequest.completed_at) - new Date(selectedRequest.created_at)) / (1000 * 60)))}
                       </Typography>
                     </Grid>
                   )}
                 </Grid>
               </Paper>
+
+              {/* AJOUT: Bouton Générer Bon de Commande */}
+              {selectedRequest && selectedRequest.type === 'order' && (
+                <Paper 
+                  elevation={2} 
+                  sx={{ 
+                    p: 3,
+                    mb: 3, 
+                    background: 'linear-gradient(145deg, #e3f2fd 0%, #bbdefb 100%)',
+                    border: '2px solid', 
+                    borderColor: 'primary.300',
+                    borderRadius: 3
+                  }}
+                >
+                  <Typography 
+                    variant="h6" 
+                    color="primary.dark" 
+                    gutterBottom 
+                    sx={{ 
+                      display: 'flex', 
+                      alignItems: 'center', 
+                      gap: 1.5, 
+                      mb: 3,
+                      fontWeight: 600
+                    }}
+                  >
+                    <PrintIcon />
+                    Bon de Commande
+                  </Typography>
+                  
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                    <Typography variant="body1" sx={{ flex: 1 }}>
+                      Quantité détectée : <strong>{extractQuantityFromDescription(selectedRequest.description)}</strong> unité(s)
+                    </Typography>
+                    <Button
+                      variant="contained"
+                      color="primary"
+                      startIcon={<FileDownloadIcon />}
+                      onClick={() => generateOrderPDF(selectedRequest, showSnackbar)}
+                      size="large"
+                      sx={{
+                        boxShadow: '0 4px 14px rgba(25, 118, 210, 0.3)',
+                        '&:hover': {
+                          boxShadow: '0 6px 20px rgba(25, 118, 210, 0.4)',
+                        }
+                      }}
+                    >
+                      Générer le Bon de Commande PDF
+                    </Button>
+                  </Box>
+                </Paper>
+              )}
 
               {/* Section d'assignation pour les admins */}
               {profile && profile.role === 'admin' && profiles.length > 0 && (
@@ -4610,6 +4975,7 @@ function App() {
         </DialogActions>
       </Dialog>
 
+      {/* Snackbar principal */}
       <Snackbar
         open={snackbar.open}
         autoHideDuration={6000}
@@ -4625,6 +4991,31 @@ function App() {
           {snackbar.message}
         </Alert>
       </Snackbar>
+
+      {/* AJOUT: Notifications multiples */}
+      {notifications.map((notification, index) => (
+        <Snackbar
+          key={notification.id}
+          open={notification.open}
+          autoHideDuration={6000}
+          anchorOrigin={{ vertical: 'top', horizontal: 'right' }}
+          sx={{ 
+            top: `${(index + 1) * 70}px !important`
+          }}
+        >
+          <Alert 
+            severity={notification.severity} 
+            sx={{ 
+              borderRadius: 3,
+              boxShadow: '0 8px 30px rgba(0,0,0,0.15)',
+              fontSize: '1rem',
+              fontWeight: 500
+            }}
+          >
+            {notification.message}
+          </Alert>
+        </Snackbar>
+      ))}
     </ThemeProvider>
   );
 }
