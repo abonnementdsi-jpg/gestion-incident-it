@@ -262,7 +262,7 @@ const LOCATIONS = [
   "Direction – Assistance de direction",
   "Direction – Bureau PDG"
 ];
-
+const notificationSound = new Audio('/notification.mp3');
 const INCIDENT_TYPES = [
   "Problème d'imprimante",
   "Demande liée à Santymed",
@@ -3194,6 +3194,7 @@ function App() {
   // NOUVEAUX ÉTATS POUR LES NOTIFICATIONS
   const [notifications, setNotifications] = useState([]);
   const [lastRequestStatus, setLastRequestStatus] = useState({});
+  const [realtimeConnected, setRealtimeConnected] = useState(false);
 
   const debugSupabaseError = (error, operation) => {
     console.error(`Erreur Supabase - ${operation}:`, {
@@ -3432,6 +3433,64 @@ function App() {
   }, []);
 
   // Initialisation
+  useEffect(() => {
+  if ('Notification' in window && Notification.permission === 'default') {
+    Notification.requestPermission().then(permission => {
+      if (permission === 'granted') {
+        showSnackbar('Notifications activées !', 'success');
+      }
+    });
+  }
+}, []);
+useEffect(() => {
+  if (user && profile) {
+    const channel = supabase
+      .channel('requests-updates')
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'requests',
+        filter: `user_id=eq.${user.id}`
+      }, (payload) => {
+        const newRequest = payload.new;
+        const oldRequest = payload.old;
+        
+        if (newRequest.status !== oldRequest.status) {
+          // Son + Vibration
+          notificationSound.play();
+          if ('vibrate' in navigator) {
+            navigator.vibrate([200, 100, 200]);
+          }
+          
+          // Notification système
+          if (Notification.permission === 'granted') {
+            new Notification(
+              newRequest.status === 'en_cours' ? '⚡ Prise en charge' : '✅ Terminée',
+              {
+                body: `Demande ${newRequest.ticket_number}`,
+                icon: '/logo-centre-diagnostic.png',
+                vibrate: [200, 100, 200]
+              }
+            );
+          }
+          
+          // Notification in-app
+          showNotification(
+            `${newRequest.ticket_number}: ${newRequest.status.replace('_', ' ')}`,
+            newRequest.status === 'termine' ? 'success' : 'info'
+          );
+          
+          // Rafraîchir
+          fetchRequests();
+        }
+      })
+      .subscribe((status) => {
+        setRealtimeConnected(status === 'SUBSCRIBED');
+      });
+    
+    return () => channel.unsubscribe();
+  }
+}, [user, profile]);
   useEffect(() => {
     checkUser();
     
@@ -4991,7 +5050,14 @@ function App() {
           {snackbar.message}
         </Alert>
       </Snackbar>
-
+      {realtimeConnected && (
+  <Chip 
+    label="🟢 En ligne" 
+    color="success" 
+    size="small"
+    sx={{ position: 'fixed', bottom: 20, left: 20, zIndex: 9999 }}
+  />
+)}
       {/* AJOUT: Notifications multiples */}
       {notifications.map((notification, index) => (
         <Snackbar
